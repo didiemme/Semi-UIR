@@ -57,6 +57,13 @@ def data_set_split(src_folder, target_folder, train_scale=0.8, val_scale=0.1, te
         print("test set{}: {}".format(test_folder, test_num))
 
 
-src_folder = "./data/benchmark/"
-target_folder = "./data/benchmark/"
-data_set_split(src_folder, target_folder)
+for dataset in ["UIEB", "EUVP", "UID2021", "UFO-120", "SUID"]:
+    src_folder = f"/home/ddimauro/Neptune/Datasets/{dataset}"
+    target_folder = f"./data_{dataset.lower()}/"
+    
+    if os.path.exists(target_folder):
+        print (f"Skipping {target_folder}")
+        continue
+    
+    os.mkdir(target_folder)
+    data_set_split(src_folder, target_folder)

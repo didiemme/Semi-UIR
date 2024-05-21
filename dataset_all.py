@@ -2,6 +2,7 @@ import os.path
 import torch
 import torch.utils.data as data
 from PIL import Image
+import PIL
 import random
 from random import randrange
 from torchvision.transforms import ToTensor
@@ -11,6 +12,16 @@ IMG_EXTENSIONS = [
     '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP',
 ]
 
+def crop_to_even(image):
+    width, height = image.size
+    new_width = width if width % 2 == 0 else width - 1
+    new_height = height if height % 2 == 0 else height - 1
+    left = (width - new_width) // 2
+    top = (height - new_height) // 2
+    right = left + new_width
+    bottom = top + new_height
+    cropped_image = image.crop((left, top, right, bottom))
+    return cropped_image
 
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
@@ -76,9 +87,9 @@ class TrainLabeled(data.Dataset):
         B = Image.open(self.B_paths[index]).convert("RGB")
         C = Image.open(self.C_paths[index]).convert("RGB")
         # resize
-        resized_a = A.resize((280, 280), Image.ANTIALIAS)
-        resized_b = B.resize((280, 280), Image.ANTIALIAS)
-        resized_c = C.resize((280, 280), Image.ANTIALIAS)
+        resized_a = A.resize((280, 280), PIL.Image.Resampling.LANCZOS)
+        resized_b = B.resize((280, 280), PIL.Image.Resampling.LANCZOS)
+        resized_c = C.resize((280, 280), PIL.Image.Resampling.LANCZOS)
         # crop the training image into fineSize
         w, h = resized_a.size
         x, y = randrange(w - self.fineSize + 1), randrange(h - self.fineSize + 1)
@@ -124,8 +135,8 @@ class TrainUnlabeled(data.Dataset):
         A = Image.open(self.A_paths[index]).convert("RGB")
         C = Image.open(self.C_paths[index]).convert("RGB")
         candidate = Image.open(self.D_paths[index]).convert('RGB')
-        A = A.resize((self.fineSize, self.fineSize), Image.ANTIALIAS)
-        C = C.resize((self.fineSize, self.fineSize), Image.ANTIALIAS)
+        A = A.resize((self.fineSize, self.fineSize), PIL.Image.Resampling.LANCZOS)
+        C = C.resize((self.fineSize, self.fineSize), PIL.Image.Resampling.LANCZOS)
         # strong augmentation
         strong_data = data_aug(A)
         tensor_w = self.transform(A)
@@ -164,9 +175,9 @@ class ValLabeled(data.Dataset):
         A = Image.open(self.A_paths[index]).convert("RGB")
         B = Image.open(self.B_paths[index]).convert("RGB")
         C = Image.open(self.C_paths[index]).convert("RGB")
-        resized_a = A.resize((self.fineSize, self.fineSize), Image.ANTIALIAS)
-        resized_b = B.resize((self.fineSize, self.fineSize), Image.ANTIALIAS)
-        resized_c = C.resize((self.fineSize, self.fineSize), Image.ANTIALIAS)
+        resized_a = A.resize((self.fineSize, self.fineSize), PIL.Image.Resampling.LANCZOS) 
+        resized_b = B.resize((self.fineSize, self.fineSize), PIL.Image.Resampling.LANCZOS)
+        resized_c = C.resize((self.fineSize, self.fineSize), PIL.Image.Resampling.LANCZOS)
         # transform to (0, 1)
         tensor_a = self.transform(resized_a)
         tensor_b = self.transform(resized_b)
@@ -198,8 +209,8 @@ class TestData(data.Dataset):
         A = Image.open(self.A_paths[index]).convert("RGB")
         C = Image.open(self.C_paths[index]).convert("RGB")
         # transform to (0, 1)
-        tensor_a = self.transform(A)
-        tensor_c = self.transform(C)
+        tensor_a = self.transform(crop_to_even(A))
+        tensor_c = self.transform(crop_to_even(C))
 
         return tensor_a, tensor_c
 

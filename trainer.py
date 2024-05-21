@@ -16,6 +16,24 @@ from model import GetGradientNopadding
 from loss.contrast import ContrastLoss
 import pyiqa
 
+class EarlyStopper:
+    def __init__(self, patience=1, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.min_validation_loss = float('inf')
+
+    def early_stop(self, validation_loss, epoch):
+        if validation_loss < self.min_validation_loss:
+            self.min_validation_loss = validation_loss
+            self.counter = 0
+            self.best_epoch = epoch
+            
+        elif validation_loss > (self.min_validation_loss + self.min_delta):
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False
 
 class Trainer:
     def __init__(self, model, tmodel, args, supervised_loader, unsupervised_loader, val_loader, iter_per_epoch, writer):
@@ -74,9 +92,22 @@ class Trainer:
         score_t = self.iqa_metric(teacher_predict).detach().cpu().numpy()
         score_s = self.iqa_metric(student_predict).detach().cpu().numpy()
         positive_sample = positive_list.clone()
-        for idx in range(0, N):
-            if score_t[idx] > score_s[idx]:
-                if score_t[idx] > score_r[idx]:
+        
+        if N > 1: 
+            for idx in range(0, N):
+                if score_t[idx] > score_s[idx]:
+                    if score_t[idx] > score_r[idx]:
+                        positive_sample[idx] = teacher_predict[idx]
+                        # update the reliable bank
+                        temp_c = np.transpose(teacher_predict[idx].detach().cpu().numpy(), (1, 2, 0))
+                        temp_c = np.clip(temp_c, 0, 1)
+                        arr_c = (temp_c*255).astype(np.uint8)
+                        arr_c = Image.fromarray(arr_c)
+                        arr_c.save('%s' % p_name[idx])
+        else:
+            idx = 0
+            if score_t > score_s:
+                if score_t > score_r:
                     positive_sample[idx] = teacher_predict[idx]
                     # update the reliable bank
                     temp_c = np.transpose(teacher_predict[idx].detach().cpu().numpy(), (1, 2, 0))
@@ -94,18 +125,23 @@ class Trainer:
         else:
             checkpoint = torch.load(self.args.resume_path)
             self.model.load_state_dict(checkpoint['state_dict'])
+            
+        early_stopper = EarlyStopper(patience=5)
         for epoch in range(self.start_epoch, self.epochs + 1):
             loss_ave, psnr_train = self._train_epoch(epoch)
             loss_val = loss_ave.item() / self.args.crop_size * self.args.train_batchsize
             train_psnr = sum(psnr_train) / len(psnr_train)
-            psnr_val = self._valid_epoch(max(0, epoch))
+            psnr_val, val_loss = self._valid_epoch(max(0, epoch))
             val_psnr = sum(psnr_val) / len(psnr_val)
 
-            print('[%d] main_loss: %.6f, train psnr: %.6f, val psnr: %.6f, lr: %.8f' % (
-                epoch, loss_val, train_psnr, val_psnr, self.lr_scheduler_s.get_last_lr()[0]))
+            print('[%d] main_loss: %.6f, val_loss: %.6f, train psnr: %.6f, val psnr: %.6f, lr: %.8f' % (
+                epoch, loss_val, val_loss, train_psnr, val_psnr, self.lr_scheduler_s.get_last_lr()[0]))
 
             for name, param in self.model.named_parameters():
                 self.writer.add_histogram(f"{name}", param, 0)
+
+            if early_stopper.early_stop(val_loss, epoch):             
+                break
 
             # Save checkpoint
             if epoch % self.save_period == 0 and self.args.local_rank <= 0:
@@ -116,6 +152,17 @@ class Trainer:
                 ckpt_name = str(self.args.save_path) + 'model_e{}.pth'.format(str(epoch))
                 print("Saving a checkpoint: {} ...".format(str(ckpt_name)))
                 torch.save(state, ckpt_name)
+                
+            if epoch == early_stopper.best_epoch:
+                state = {'arch': type(self.model).__name__,
+                         'epoch': epoch,
+                         'state_dict': self.model.state_dict(),
+                         'optimizer_dict': self.optimizer_s.state_dict()}
+                ckpt_name = str(self.args.save_path) + 'model_best.pth'
+                print("Saving a checkpoint: {} ...".format(str(ckpt_name)))
+                torch.save(state, ckpt_name)
+
+            print(f'Patience: {early_stopper.counter}/{early_stopper.patience}, Min validation loss: {early_stopper.min_validation_loss}')
 
     def _train_epoch(self, epoch):
         sup_loss = AverageMeter()
@@ -190,7 +237,14 @@ class Trainer:
                 val_label = Variable(val_label).cuda()
                 val_la = Variable(val_la).cuda()
                 # forward
-                val_output, _ = self.model(val_data, val_la)
+                val_output, val_output_g = self.model(val_data, val_la)
+                
+                structure_loss = self.loss_str(val_output, val_label)
+                perpetual_loss = self.loss_per(val_output, val_label)
+                get_grad = GetGradientNopadding().cuda()
+                gradient_loss = self.loss_grad(get_grad(val_output), get_grad(val_label)) + self.loss_grad(val_output_g, get_grad(val_label))
+                loss_sup = structure_loss + 0.3 * perpetual_loss + 0.1 * gradient_loss
+                
                 temp_psnr, temp_ssim, N = compute_psnr_ssim(val_output, val_label)
                 val_psnr.update(temp_psnr, N)
                 val_ssim.update(temp_ssim, N)
@@ -201,7 +255,7 @@ class Trainer:
             self.writer.add_scalar('Val_psnr', val_psnr.avg, global_step=epoch)
             self.writer.add_scalar('Val_ssim', val_ssim.avg, global_step=epoch)
             del val_output, val_label, val_data
-            return psnr_val
+            return psnr_val, loss_sup
 
     def _get_available_devices(self, n_gpu):
         sys_gpu = torch.cuda.device_count()

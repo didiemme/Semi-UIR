@@ -1,0 +1,1 @@
+python test.py --train_dataset ufo120 --benchmark RUIE_UIQS --checkpoint model_best.pth

@@ -15,7 +15,7 @@ def main(gpu, args):
     setup_seed(2022)
     # load data
     train_folder = args.data_dir
-    paired_dataset = TrainLabeled(dataroot=train_folder, phase='labeled1', finesize=args.crop_size)
+    paired_dataset = TrainLabeled(dataroot=train_folder, phase='labeled', finesize=args.crop_size)
     unpaired_dataset = TrainUnlabeled(dataroot=train_folder, phase='unlabeled', finesize=args.crop_size)
     val_dataset = ValLabeled(dataroot=train_folder, phase='val', finesize=args.crop_size)
     paired_sampler = None

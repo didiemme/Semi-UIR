@@ -20,15 +20,30 @@ def luminance_estimation(img):
     L = np.uint8(L * 255)
     return L
 
+def parse_dir(input_dir):
+    input_lists = glob(join(input_dir, 'input', "*.*"))
+    result_dir = join(input_dir, 'LA')
+    if not os.path.exists(result_dir):
+        os.makedirs(result_dir)
+    for gen_path in zip(input_lists):
+        img = Image.open(gen_path[0])
+        img_name = gen_path[0].split(os.sep)[-1]
+        L = luminance_estimation(img)
+        ndar = Image.fromarray(L)
+        ndar.save(os.path.join(result_dir, img_name))
 
-input_dir = "data/test/unlabeled/input"
-input_lists = glob(join(input_dir, "*.*"))
-result_dir = "data/test/unlabeled/LA/"
-for gen_path in zip(input_lists):
-    img = Image.open(gen_path[0])
-    img_name = gen_path[0].split('/')[4]
-    L = luminance_estimation(img)
-    ndar = Image.fromarray(L)
-    ndar.save(os.path.join(result_path, img_name))
+root_dir = "/home/ddimauro/Neptune/Enhancement/Semi-UIR/data/suid"
 
+for split in ["val", "labeled", "unlabeled"]: 
+    input_dir = f"{root_dir}/{split}"
+    print (f"Create Luminance for {split}")
+    parse_dir(input_dir)
+
+"""
+for benchmark in ['RUIE_UIQS']:
+    input_dir = f"{root_dir}/test/{benchmark}"
+    print (f"Create Luminance for {benchmark}")
+    parse_dir(input_dir)    
+"""
+        
 print('finished!')
